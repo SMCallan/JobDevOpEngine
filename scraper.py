@@ -53,16 +53,16 @@ def run_d1_query(sql_query: str) -> dict:
         return {}
 
 def init_db() -> None:
-    """Forces the table to exist so we don't get 'table not found' errors."""
-    print("⚙️ Initializing Cloudflare DB Table...")
-    run_d1_query("CREATE TABLE IF NOT EXISTS seen_jobs (id TEXT PRIMARY KEY, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);")
+    """Forces the expanded table to exist so we don't get 'table not found' errors."""
+    print("⚙️ Initializing Cloudflare DB Table (Full Schema)...")
+    run_d1_query("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, title TEXT, company TEXT, salary TEXT, link TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);")
 
 def is_new_job(job_id: str) -> bool:
-    """Queries D1 to see if the job ID already exists."""
+    """Queries D1 to see if the job ID already exists in the new 'jobs' table."""
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         return True 
 
-    data = run_d1_query(f"SELECT id FROM seen_jobs WHERE id = '{job_id}';")
+    data = run_d1_query(f"SELECT id FROM jobs WHERE id = '{job_id}';")
     
     try:
         # CF returns data in a deeply nested array: data['result'][0]['results']
@@ -71,12 +71,20 @@ def is_new_job(job_id: str) -> bool:
     except Exception:
         return True # Default to True if parsing fails so you don't miss jobs
 
-def save_job_to_db(job_id: str) -> None:
-    """Saves the job ID to prevent future duplicates."""
+def save_job_to_db(job: dict) -> None:
+    """Saves the full job details to prevent future duplicates AND populate the website."""
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         return
+        
+    # Escape single quotes for SQL insertion (e.g., "L'Oreal" becomes "L''Oreal")
+    title = job['title'].replace("'", "''")
+    company = job['company'].replace("'", "''")
+    salary = job['salary'].replace("'", "''")
+    link = job['link'].replace("'", "''")
+    
     # INSERT OR IGNORE prevents a crash if the ID somehow already exists
-    run_d1_query(f"INSERT OR IGNORE INTO seen_jobs (id) VALUES ('{job_id}');")
+    sql = f"INSERT OR IGNORE INTO jobs (id, title, company, salary, link) VALUES ('{job['id']}', '{title}', '{company}', '{salary}', '{link}');"
+    run_d1_query(sql)
 
 
 # ==========================================
@@ -214,7 +222,7 @@ def send_to_discord(jobs: List[Dict[str, str]]) -> None:
 if __name__ == "__main__":
     print("--- Starting UK API Job Aggregator Pipeline ---")
     
-    # Initialize the Database (Creates table if missing)
+    # Initialize the Database (Creates full schema table if missing)
     if all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         init_db()
         
@@ -231,7 +239,7 @@ if __name__ == "__main__":
     for job in final_selection:
         if is_new_job(job['id']):
             new_jobs_only.append(job)
-            save_job_to_db(job['id'])
+            save_job_to_db(job) # <-- Now passes the entire job dictionary
             
             # Stop if we hit our daily maximum of 10 to prevent Discord spam
             if len(new_jobs_only) >= 10:
