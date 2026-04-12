@@ -57,6 +57,11 @@ def init_db() -> None:
     print("⚙️ Initializing Cloudflare DB Table (Full Schema)...")
     run_d1_query("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, title TEXT, company TEXT, salary TEXT, link TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);")
 
+def clean_old_jobs() -> None:
+    """Deletes jobs older than 30 days to keep the database lean."""
+    print("🧹 Pruning jobs older than 30 days from the database...")
+    run_d1_query("DELETE FROM jobs WHERE timestamp < datetime('now', '-30 days');")
+
 def is_new_job(job_id: str) -> bool:
     """Queries D1 to see if the job ID already exists in the new 'jobs' table."""
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
@@ -222,15 +227,15 @@ def send_to_discord(jobs: List[Dict[str, str]]) -> None:
 if __name__ == "__main__":
     print("--- Starting UK API Job Aggregator Pipeline ---")
     
-    # Initialize the Database (Creates full schema table if missing)
     if all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         init_db()
+        clean_old_jobs() # <--- ADD THIS LINE HERE
         
     adzuna_list = fetch_adzuna_london()
     reed_list = fetch_reed_london()
     
-    # INTERLEAVE: Take top candidates from both platforms
-    final_selection = adzuna_list[:10] + reed_list[:10]
+    # Widen the net: Take top 100 from both instead of just 10
+    final_selection = adzuna_list[:100] + reed_list[:100]
     
     print(f"📊 Filtering {len(final_selection)} total candidates through D1 Database...")
     
