@@ -62,10 +62,10 @@ def is_new_job(job_id: str) -> bool:
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         return True 
 
+    # FIXED: Now strictly looking at the new 'jobs' table
     data = run_d1_query(f"SELECT id FROM jobs WHERE id = '{job_id}';")
     
     try:
-        # CF returns data in a deeply nested array: data['result'][0]['results']
         results = data.get('result', [{}])[0].get('results', [])
         return len(results) == 0
     except Exception:
