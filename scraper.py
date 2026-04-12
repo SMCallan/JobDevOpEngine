@@ -8,13 +8,15 @@ import json
 # When running in GitHub Actions, it will pull from your Repository Secrets.
 # ==========================================
 
-DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/1492831697958473758/J9tMwhPzNcSk2UWg0fDYqrkIIxLJKM4W2txawEpv-AnoXCFn3ajrAJ2GaKDCumz7g0Jg')
+# 1. Discord Webhook
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/YOUR_FAKE_PLACEHOLDER')
 
+# 2. Adzuna Credentials
 ADZUNA_APP_ID = os.environ.get('ADZUNA_APP_ID', '721a4f20')
 ADZUNA_APP_KEY = os.environ.get('ADZUNA_APP_KEY', 'fe4a4b6b7ce55491d418ee2511b58bf3')
 
-# You didn't provide a Reed key, so leaving this as a generic placeholder
-REED_API_KEY = os.environ.get('REED_API_KEY', 'dbd62519-5368-4781-9e5a-65039d18a4a3')
+# 3. Reed API Key
+REED_API_KEY = os.environ.get('REED_API_KEY', 'YOUR_REED_API_KEY_HERE')
 
 # Search Criteria
 ADZUNA_KEYWORDS = ["devsecops", "appsec", "python security", "cloud security"]
