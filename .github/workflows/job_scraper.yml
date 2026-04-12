@@ -2,13 +2,15 @@ name: Daily Job Search Pipeline
 
 on:
   schedule:
-    # Runs at 10:00 AM London Time (UTC) every day
+    # Runs at 10:00 AM UTC every day
     - cron: '0 10 * * *'
-  workflow_dispatch: # This adds a "Run Now" button in GitHub for testing
+  workflow_dispatch: # Allows manual triggering from the GitHub Actions UI
 
 jobs:
   run-scraper:
+    name: Fetch and Process Jobs
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # 🛑 Best Practice: Prevents infinite hangs if APIs go down
 
     steps:
       - name: Checkout Repository
@@ -18,6 +20,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip' # ⚡ Best Practice: Caches dependencies to speed up the run
 
       - name: Install Dependencies
         run: |
@@ -25,10 +28,13 @@ jobs:
           pip install -r requirements.txt
 
       - name: Execute Scraper
-        # This is the "Bridge" connecting your Secret Vault to your Python script
+        # 🔐 Bridge connecting GitHub Secrets to Python OS Environment Variables
         env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
           ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           REED_API_KEY: ${{ secrets.REED_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_DATABASE_ID: ${{ secrets.CF_DATABASE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: python scraper.py
