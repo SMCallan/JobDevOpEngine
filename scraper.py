@@ -23,10 +23,11 @@ CF_DATABASE_ID = os.environ.get('CF_DATABASE_ID')
 CF_API_TOKEN = os.environ.get('CF_API_TOKEN')
 
 # ==========================================
-# 🎯 SEARCH CRITERIA & FILTERS
+# 🎯 SEARCH CRITERIA & FILTERS (BROADENED FOR UI SEARCH)
 # ==========================================
-ADZUNA_KEYWORDS = ["devsecops", "appsec", "python security", "cloud security"]
-REED_KEYWORDS = "(devsecops OR appsec OR python) NOT (Graduate OR Trainee)"
+# We cast a wider net here so the Database fills up, allowing the React UI search bar to do the heavy lifting.
+ADZUNA_KEYWORDS = ["security engineer", "appsec", "python", "cloud security", "devsecops", "devops"]
+REED_KEYWORDS = "(security OR appsec OR python OR devops) NOT (Graduate OR Trainee)"
 
 # Kill the noise: Ignore roles containing these keywords in the title
 BLACKLIST = ["graduate", "trainee", "recruitment", "sales", "retail", "commerce", "full stack", "frontend", "front-end"]
@@ -67,7 +68,6 @@ def is_new_job(job_id: str) -> bool:
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         return True 
 
-    # FIXED: Now strictly looking at the new 'jobs' table
     data = run_d1_query(f"SELECT id FROM jobs WHERE id = '{job_id}';")
     
     try:
@@ -81,7 +81,7 @@ def save_job_to_db(job: dict) -> None:
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         return
         
-    # Escape single quotes for SQL insertion (e.g., "L'Oreal" becomes "L''Oreal")
+    # Escape single quotes for SQL insertion
     title = job['title'].replace("'", "''")
     company = job['company'].replace("'", "''")
     salary = job['salary'].replace("'", "''")
@@ -106,7 +106,7 @@ def fetch_adzuna_london() -> List[Dict[str, str]]:
         params = {
             "app_id": ADZUNA_APP_ID,
             "app_key": ADZUNA_APP_KEY,
-            "results_per_page": 15,
+            "results_per_page": 50, # Increased payload per page
             "what": kw,
             "where": "london",
             "sort_by": "date"
@@ -119,7 +119,7 @@ def fetch_adzuna_london() -> List[Dict[str, str]]:
                 
                 for job in jobs:
                     raw_id = str(job.get('id'))
-                    prefixed_id = f"adzuna_{raw_id}" # Prefix guarantees global uniqueness
+                    prefixed_id = f"adzuna_{raw_id}"
                     title = job.get("title", "").replace('<strong>', '').replace('</strong>', '')
                     
                     if any(word in title.lower() for word in BLACKLIST) or prefixed_id in unique_jobs:
@@ -158,7 +158,8 @@ def fetch_reed_london() -> List[Dict[str, str]]:
     params = {
         "keywords": REED_KEYWORDS,
         "locationName": "london",
-        "distanceFromLocation": 5
+        "distanceFromLocation": 5,
+        "resultsToTake": 100 # Increased payload
     }
 
     found_jobs = []
@@ -169,7 +170,7 @@ def fetch_reed_london() -> List[Dict[str, str]]:
         
         for job in jobs:
             raw_id = str(job.get('jobId'))
-            prefixed_id = f"reed_{raw_id}" # Prefix guarantees global uniqueness
+            prefixed_id = f"reed_{raw_id}"
             title = job.get("jobTitle", "")
             
             if any(word in title.lower() for word in BLACKLIST):
@@ -199,7 +200,6 @@ def fetch_reed_london() -> List[Dict[str, str]]:
 # ==========================================
 def send_to_discord(jobs: List[Dict[str, str]]) -> None:
     if not jobs:
-        print("🛑 No new London jobs found today. Staying silent.")
         return
 
     print(f"🚀 Preparing to send {len(jobs)} NEW jobs to Discord...")
@@ -211,7 +211,7 @@ def send_to_discord(jobs: List[Dict[str, str]]) -> None:
             "color": 15158332 # London Red
         })
 
-    payload = {"content": f"🇬🇧 **Latest London DevSecOps & Python Roles** 🇬🇧", "embeds": embeds}
+    payload = {"content": f"🇬🇧 **Latest Top 10 London Roles** 🇬🇧", "embeds": embeds}
 
     try:
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
@@ -227,31 +227,32 @@ def send_to_discord(jobs: List[Dict[str, str]]) -> None:
 if __name__ == "__main__":
     print("--- Starting UK API Job Aggregator Pipeline ---")
     
+    # 1. Initialize & Clean
     if all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         init_db()
-        clean_old_jobs() # <--- ADD THIS LINE HERE
+        clean_old_jobs()
         
+    # 2. Fetch Data
     adzuna_list = fetch_adzuna_london()
     reed_list = fetch_reed_london()
     
-    # Widen the net: Take top 100 from both instead of just 10
-    final_selection = adzuna_list[:100] + reed_list[:100]
+    # Widen the net: Take up to 250 from each to build a rich search DB
+    final_selection = adzuna_list[:250] + reed_list[:250]
     
     print(f"📊 Filtering {len(final_selection)} total candidates through D1 Database...")
     
-    # DATABASE FILTERING
+    # 3. DATABASE INGESTION: Save EVERYTHING that is new
     new_jobs_only = []
     for job in final_selection:
         if is_new_job(job['id']):
             new_jobs_only.append(job)
-            save_job_to_db(job) # <-- Now passes the entire job dictionary
+            save_job_to_db(job)
             
-            # Stop if we hit our daily maximum of 10 to prevent Discord spam
-            if len(new_jobs_only) >= 10:
-                break
+    print(f"💾 Saved {len(new_jobs_only)} brand new roles to the Database!")
     
+    # 4. DISCORD ALERT: Only send the top 10 to prevent notification spam
     if new_jobs_only:
-        send_to_discord(new_jobs_only)
+        send_to_discord(new_jobs_only[:10]) 
     else:
         print("☕ Database check complete: No new roles found. Enjoy your day!")
         
