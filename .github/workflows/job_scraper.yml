@@ -1,30 +1,34 @@
-name: Daily DevSecOps Job Scraper
+name: Daily Job Search Pipeline
 
 on:
   schedule:
-    - cron: '0 9 * * *'
-  workflow_dispatch:
+    # Runs at 10:00 AM London Time (UTC) every day
+    - cron: '0 10 * * *'
+  workflow_dispatch: # This adds a "Run Now" button in GitHub for testing
 
 jobs:
-  scrape-and-notify:
+  run-scraper:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run scraper
+      - name: Execute Scraper
+        # This is the "Bridge" connecting your Secret Vault to your Python script
         env:
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REED_API_KEY: ${{ secrets.REED_API_KEY }}
         run: python scraper.py
