@@ -39,7 +39,7 @@ def get_cf_url() -> str:
     """Constructs the Cloudflare D1 Query API endpoint."""
     return f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/d1/database/{CF_DATABASE_ID}/query"
 
-def get_cf_headers() -> Dict[str, str]:
+def get_cf_headers() -> dict:
     """Constructs the Auth headers for Cloudflare."""
     return {
         "Authorization": f"Bearer {CF_API_TOKEN}", 
@@ -48,43 +48,42 @@ def get_cf_headers() -> Dict[str, str]:
 
 def is_new_job(job_id: str) -> bool:
     """Queries D1 to check if we have already sent this job to Discord."""
-    # Graceful Fallback: If DB isn't configured, assume all jobs are new.
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
+        print("⚠️ DB Check Skipped: Missing Cloudflare Credentials in Environment.")
         return True 
 
-    payload = {
-        "params": [job_id],
-        "sql": "SELECT id FROM seen_jobs WHERE id = ?"
-    }
+    # FIX: Cloudflare REST API prefers raw SQL strings over the 'params' array
+    payload = {"sql": f"SELECT id FROM seen_jobs WHERE id = '{job_id}'"}
     
     try:
         response = requests.post(get_cf_url(), json=payload, headers=get_cf_headers(), timeout=10)
-        response.raise_for_status()
-        data = response.json()
         
-        # Cloudflare D1 returns results in a nested array. If it's empty, the job is new.
+        # Verbose error logging so we can see the exact Cloudflare rejection reason
+        if response.status_code != 200:
+            print(f"⚠️ DB Read Error {response.status_code} for {job_id}: {response.text}")
+            return True
+            
+        data = response.json()
         results = data.get('result', [{}])[0].get('results', [])
         return len(results) == 0
     except Exception as e:
         print(f"⚠️ DB Read Check failed for {job_id}: {e}")
-        return True # Default to sending the job if DB fails so you don't miss leads
+        return True 
 
 def save_job_to_db(job_id: str) -> None:
     """Inserts a successfully processed job ID into the D1 database."""
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         return
 
-    payload = {
-        "params": [job_id],
-        "sql": "INSERT INTO seen_jobs (id) VALUES (?)"
-    }
+    # FIX: Direct string interpolation for the INSERT
+    payload = {"sql": f"INSERT INTO seen_jobs (id) VALUES ('{job_id}')"}
     
     try:
         response = requests.post(get_cf_url(), json=payload, headers=get_cf_headers(), timeout=10)
-        response.raise_for_status()
+        if response.status_code != 200:
+            print(f"⚠️ DB Write Error {response.status_code} for {job_id}: {response.text}")
     except Exception as e:
         print(f"⚠️ DB Write failed for {job_id}: {e}")
-
 
 # ==========================================
 # 📡 MODULE 2: ADZUNA API
