@@ -1,11 +1,10 @@
 import os
 import requests
-import json
+from typing import List, Dict, Any
 
 # ==========================================
 # 🛑 SECURE CONFIGURATION
-# We have removed all hardcoded keys. 
-# The script now looks ONLY for environment variables.
+# Keys are injected dynamically via Environment Variables (GitHub Actions)
 # ==========================================
 
 # 1. Discord Webhook
@@ -18,17 +17,79 @@ ADZUNA_APP_KEY = os.environ.get('ADZUNA_APP_KEY')
 # 3. Reed API Key
 REED_API_KEY = os.environ.get('REED_API_KEY')
 
-# Search Criteria
+# 4. Cloudflare D1 Credentials (State Management)
+CF_ACCOUNT_ID = os.environ.get('CF_ACCOUNT_ID')
+CF_DATABASE_ID = os.environ.get('CF_DATABASE_ID')
+CF_API_TOKEN = os.environ.get('CF_API_TOKEN')
+
+# ==========================================
+# 🎯 SEARCH CRITERIA & FILTERS
+# ==========================================
 ADZUNA_KEYWORDS = ["devsecops", "appsec", "python security", "cloud security"]
 REED_KEYWORDS = "(devsecops OR appsec OR python) NOT (Graduate OR Trainee)"
 
-# 🔥 ENHANCED BLACKLIST: Add "commerce" and "full stack" to kill the noise
+# Kill the noise: Ignore roles containing these keywords in the title
 BLACKLIST = ["graduate", "trainee", "recruitment", "sales", "retail", "commerce", "full stack", "frontend", "front-end"]
 
+
 # ==========================================
-# 📡 MODULE 1: ADZUNA API
+# 🗄️ MODULE 1: CLOUDFLARE D1 STATE MANAGEMENT
 # ==========================================
-def fetch_adzuna_london():
+def get_cf_url() -> str:
+    """Constructs the Cloudflare D1 Query API endpoint."""
+    return f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/d1/database/{CF_DATABASE_ID}/query"
+
+def get_cf_headers() -> Dict[str, str]:
+    """Constructs the Auth headers for Cloudflare."""
+    return {
+        "Authorization": f"Bearer {CF_API_TOKEN}", 
+        "Content-Type": "application/json"
+    }
+
+def is_new_job(job_id: str) -> bool:
+    """Queries D1 to check if we have already sent this job to Discord."""
+    # Graceful Fallback: If DB isn't configured, assume all jobs are new.
+    if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
+        return True 
+
+    payload = {
+        "params": [job_id],
+        "sql": "SELECT id FROM seen_jobs WHERE id = ?"
+    }
+    
+    try:
+        response = requests.post(get_cf_url(), json=payload, headers=get_cf_headers(), timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Cloudflare D1 returns results in a nested array. If it's empty, the job is new.
+        results = data.get('result', [{}])[0].get('results', [])
+        return len(results) == 0
+    except Exception as e:
+        print(f"⚠️ DB Read Check failed for {job_id}: {e}")
+        return True # Default to sending the job if DB fails so you don't miss leads
+
+def save_job_to_db(job_id: str) -> None:
+    """Inserts a successfully processed job ID into the D1 database."""
+    if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
+        return
+
+    payload = {
+        "params": [job_id],
+        "sql": "INSERT INTO seen_jobs (id) VALUES (?)"
+    }
+    
+    try:
+        response = requests.post(get_cf_url(), json=payload, headers=get_cf_headers(), timeout=10)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"⚠️ DB Write failed for {job_id}: {e}")
+
+
+# ==========================================
+# 📡 MODULE 2: ADZUNA API
+# ==========================================
+def fetch_adzuna_london() -> List[Dict[str, str]]:
     print("🇬🇧 Fetching live London jobs from Adzuna API...")
     url = "https://api.adzuna.com/v1/api/jobs/gb/search/1"
     unique_jobs = {}
@@ -48,20 +109,22 @@ def fetch_adzuna_london():
         try:
             response = requests.get(url, params=params, headers=headers, timeout=10)
             if response.status_code == 200:
-                data = response.json()
-                jobs = data.get('results', [])
+                jobs = response.json().get('results', [])
+                
                 for job in jobs:
-                    job_id = str(job.get('id'))
+                    raw_id = str(job.get('id'))
+                    prefixed_id = f"adzuna_{raw_id}" # Prefix guarantees global uniqueness
                     title = job.get("title", "").replace('<strong>', '').replace('</strong>', '')
                     
-                    if any(word in title.lower() for word in BLACKLIST) or job_id in unique_jobs:
+                    if any(word in title.lower() for word in BLACKLIST) or prefixed_id in unique_jobs:
                         continue
 
                     company_name = job.get("company", {}).get("display_name", "Unknown Company")
                     s_min, s_max = job.get('salary_min'), job.get('salary_max')
                     salary_str = f"£{int(s_min)} - £{int(s_max)}" if s_min and s_max else "💰 Unlisted"
 
-                    unique_jobs[job_id] = {
+                    unique_jobs[prefixed_id] = {
+                        "id": prefixed_id,
                         "title": title,
                         "company": company_name,
                         "salary": salary_str,
@@ -72,20 +135,20 @@ def fetch_adzuna_london():
             print(f"  ⚠️ Adzuna request failed for '{kw}': {e}")
         
     found_list = list(unique_jobs.values())
-    print(f"✅ Adzuna found {len(found_list)} unique relevant jobs.")
+    print(f"✅ Adzuna found {len(found_list)} relevant jobs.")
     return found_list
 
+
 # ==========================================
-# 📡 MODULE 2: REED API
+# 📡 MODULE 3: REED API
 # ==========================================
-def fetch_reed_london():
+def fetch_reed_london() -> List[Dict[str, str]]:
     print("🇬🇧 Fetching live London jobs from Reed API...")
-    url = "https://www.reed.co.uk/api/1.0/search"
-    
-    if REED_API_KEY == 'YOUR_REED_API_KEY_HERE':
+    if not REED_API_KEY or REED_API_KEY == 'YOUR_REED_API_KEY_HERE':
         print("⚠️ Skipping Reed: No API Key provided.")
         return []
 
+    url = "https://www.reed.co.uk/api/1.0/search"
     params = {
         "keywords": REED_KEYWORDS,
         "locationName": "london",
@@ -99,7 +162,10 @@ def fetch_reed_london():
         jobs = response.json().get('results', [])
         
         for job in jobs:
+            raw_id = str(job.get('jobId'))
+            prefixed_id = f"reed_{raw_id}" # Prefix guarantees global uniqueness
             title = job.get("jobTitle", "")
+            
             if any(word in title.lower() for word in BLACKLIST):
                 continue
 
@@ -107,6 +173,7 @@ def fetch_reed_london():
             salary_str = f"£{min_sal} - £{max_sal}" if min_sal and max_sal else "💰 Unlisted"
 
             found_jobs.append({
+                "id": prefixed_id,
                 "title": title,
                 "company": job.get("employerName"),
                 "salary": salary_str,
@@ -120,15 +187,16 @@ def fetch_reed_london():
     print(f"✅ Reed found {len(found_jobs)} relevant jobs.")
     return found_jobs
 
+
 # ==========================================
-# 🚀 DISCORD NOTIFICATION ENGINE
+# 🚀 MODULE 4: DISCORD NOTIFICATION ENGINE
 # ==========================================
-def send_to_discord(jobs):
+def send_to_discord(jobs: List[Dict[str, str]]) -> None:
     if not jobs:
-        print("🛑 No London jobs found today. Staying silent.")
+        print("🛑 No new London jobs found today. Staying silent.")
         return
 
-    print(f"🚀 Preparing to send {len(jobs)} jobs to Discord...")
+    print(f"🚀 Preparing to send {len(jobs)} NEW jobs to Discord...")
     embeds = []
     for job in jobs:
         embeds.append({
@@ -140,11 +208,12 @@ def send_to_discord(jobs):
     payload = {"content": f"🇬🇧 **Latest London DevSecOps & Python Roles** 🇬🇧", "embeds": embeds}
 
     try:
-        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         response.raise_for_status()
         print("✅ Successfully sent jobs to Discord!")
     except Exception as e:
         print(f"❌ Failed to send to Discord: {e}")
+
 
 # ==========================================
 # ⚙️ MAIN EXECUTION PIPELINE
@@ -155,10 +224,25 @@ if __name__ == "__main__":
     adzuna_list = fetch_adzuna_london()
     reed_list = fetch_reed_london()
     
-    # INTERLEAVE: Take top 5 from Adzuna and top 5 from Reed
-    final_selection = adzuna_list[:5] + reed_list[:5]
-    final_selection = final_selection[:10]
+    # INTERLEAVE: Take top candidates from both platforms
+    final_selection = adzuna_list[:10] + reed_list[:10]
     
-    print(f"📊 Final aggregated count: {len(final_selection)}")
-    send_to_discord(final_selection)
+    print(f"📊 Filtering {len(final_selection)} total candidates through D1 Database...")
+    
+    # DATABASE FILTERING
+    new_jobs_only = []
+    for job in final_selection:
+        if is_new_job(job['id']):
+            new_jobs_only.append(job)
+            save_job_to_db(job['id'])
+            
+            # Stop if we hit our daily maximum of 10 to prevent Discord spam
+            if len(new_jobs_only) >= 10:
+                break
+    
+    if new_jobs_only:
+        send_to_discord(new_jobs_only)
+    else:
+        print("☕ Database check complete: No new roles found. Enjoy your day!")
+        
     print("--- Pipeline Finished ---")
