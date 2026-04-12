@@ -33,57 +33,51 @@ BLACKLIST = ["graduate", "trainee", "recruitment", "sales", "retail", "commerce"
 
 
 # ==========================================
-# 🗄️ MODULE 1: CLOUDFLARE D1 STATE MANAGEMENT
+# 🗄️ MODULE 1: CLOUDFLARE D1 (Direct HTTP)
 # ==========================================
-def get_cf_url() -> str:
-    """Constructs the Cloudflare D1 Query API endpoint."""
-    return f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/d1/database/{CF_DATABASE_ID}/query"
-
-def get_cf_headers() -> dict:
-    """Constructs the Auth headers for Cloudflare."""
-    return {
-        "Authorization": f"Bearer {CF_API_TOKEN}", 
+def run_d1_query(sql_query: str) -> dict:
+    """Executes raw SQL against the Cloudflare D1 HTTP API."""
+    url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/d1/database/{CF_DATABASE_ID}/query"
+    headers = {
+        "Authorization": f"Bearer {CF_API_TOKEN}",
         "Content-Type": "application/json"
     }
+    
+    try:
+        response = requests.post(url, json={"sql": sql_query}, headers=headers, timeout=10)
+        if response.status_code != 200:
+            print(f"❌ CF API Error ({response.status_code}): {response.text}")
+        return response.json()
+    except Exception as e:
+        print(f"❌ Network Error to CF: {e}")
+        return {}
+
+def init_db() -> None:
+    """Forces the table to exist so we don't get 'table not found' errors."""
+    print("⚙️ Initializing Cloudflare DB Table...")
+    run_d1_query("CREATE TABLE IF NOT EXISTS seen_jobs (id TEXT PRIMARY KEY, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);")
 
 def is_new_job(job_id: str) -> bool:
-    """Queries D1 to check if we have already sent this job to Discord."""
+    """Queries D1 to see if the job ID already exists."""
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
-        print("⚠️ DB Check Skipped: Missing Cloudflare Credentials in Environment.")
         return True 
 
-    # FIX: Cloudflare REST API prefers raw SQL strings over the 'params' array
-    payload = {"sql": f"SELECT id FROM seen_jobs WHERE id = '{job_id}'"}
+    data = run_d1_query(f"SELECT id FROM seen_jobs WHERE id = '{job_id}';")
     
     try:
-        response = requests.post(get_cf_url(), json=payload, headers=get_cf_headers(), timeout=10)
-        
-        # Verbose error logging so we can see the exact Cloudflare rejection reason
-        if response.status_code != 200:
-            print(f"⚠️ DB Read Error {response.status_code} for {job_id}: {response.text}")
-            return True
-            
-        data = response.json()
+        # CF returns data in a deeply nested array: data['result'][0]['results']
         results = data.get('result', [{}])[0].get('results', [])
         return len(results) == 0
-    except Exception as e:
-        print(f"⚠️ DB Read Check failed for {job_id}: {e}")
-        return True 
+    except Exception:
+        return True # Default to True if parsing fails so you don't miss jobs
 
 def save_job_to_db(job_id: str) -> None:
-    """Inserts a successfully processed job ID into the D1 database."""
+    """Saves the job ID to prevent future duplicates."""
     if not all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
         return
+    # INSERT OR IGNORE prevents a crash if the ID somehow already exists
+    run_d1_query(f"INSERT OR IGNORE INTO seen_jobs (id) VALUES ('{job_id}');")
 
-    # FIX: Direct string interpolation for the INSERT
-    payload = {"sql": f"INSERT INTO seen_jobs (id) VALUES ('{job_id}')"}
-    
-    try:
-        response = requests.post(get_cf_url(), json=payload, headers=get_cf_headers(), timeout=10)
-        if response.status_code != 200:
-            print(f"⚠️ DB Write Error {response.status_code} for {job_id}: {response.text}")
-    except Exception as e:
-        print(f"⚠️ DB Write failed for {job_id}: {e}")
 
 # ==========================================
 # 📡 MODULE 2: ADZUNA API
@@ -220,6 +214,10 @@ def send_to_discord(jobs: List[Dict[str, str]]) -> None:
 if __name__ == "__main__":
     print("--- Starting UK API Job Aggregator Pipeline ---")
     
+    # Initialize the Database (Creates table if missing)
+    if all([CF_ACCOUNT_ID, CF_DATABASE_ID, CF_API_TOKEN]):
+        init_db()
+        
     adzuna_list = fetch_adzuna_london()
     reed_list = fetch_reed_london()
     
