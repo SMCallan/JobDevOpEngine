@@ -3,20 +3,20 @@ import requests
 import json
 
 # ==========================================
-# 🛑 CONFIGURATION & SECRETS
-# Using your provided placeholders for local execution.
-# When running in GitHub Actions, it will pull from your Repository Secrets.
+# 🛑 SECURE CONFIGURATION
+# We have removed all hardcoded keys. 
+# The script now looks ONLY for environment variables.
 # ==========================================
 
 # 1. Discord Webhook
-DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/YOUR_FAKE_PLACEHOLDER')
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 # 2. Adzuna Credentials
-ADZUNA_APP_ID = os.environ.get('ADZUNA_APP_ID', '721a4f20')
-ADZUNA_APP_KEY = os.environ.get('ADZUNA_APP_KEY', 'fe4a4b6b7ce55491d418ee2511b58bf3')
+ADZUNA_APP_ID = os.environ.get('ADZUNA_APP_ID')
+ADZUNA_APP_KEY = os.environ.get('ADZUNA_APP_KEY')
 
 # 3. Reed API Key
-REED_API_KEY = os.environ.get('REED_API_KEY', 'YOUR_REED_API_KEY_HERE')
+REED_API_KEY = os.environ.get('REED_API_KEY')
 
 # Search Criteria
 ADZUNA_KEYWORDS = ["devsecops", "appsec", "python security", "cloud security"]
