@@ -26,11 +26,25 @@ CF_API_TOKEN = os.environ.get('CF_API_TOKEN')
 # 🎯 SEARCH CRITERIA & FILTERS (BROADENED FOR UI SEARCH)
 # ==========================================
 # We cast a wider net here so the Database fills up, allowing the React UI search bar to do the heavy lifting.
-ADZUNA_KEYWORDS = ["security engineer", "appsec", "python", "cloud security", "devsecops", "devops"]
-REED_KEYWORDS = "(security OR appsec OR python OR devops) NOT (Graduate OR Trainee)"
+ADZUNA_KEYWORDS = [
+    "application security", 
+    "appsec", 
+    "product security", 
+    "devsecops", 
+    "security researcher", 
+    "threat intelligence", 
+    "backend security"
+]
+
+REED_KEYWORDS = '("application security" OR "appsec" OR "product security" OR "devsecops" OR "security researcher" OR "threat intelligence") NOT (Graduate OR Trainee OR Junior OR Intern)'
 
 # Kill the noise: Ignore roles containing these keywords in the title
-BLACKLIST = ["graduate", "trainee", "recruitment", "sales", "retail", "commerce", "full stack", "frontend", "front-end"]
+BLACKLIST = [
+    "graduate", "trainee", "intern", "junior", 
+    "recruitment", "sales", "retail", "commerce", 
+    "frontend", "front-end", "support", "helpdesk", 
+    "1st line", "2nd line", "customer service"
+]
 
 
 # ==========================================
