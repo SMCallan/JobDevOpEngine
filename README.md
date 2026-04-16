@@ -6,7 +6,7 @@ This is the automated data ingestion pipeline for the DevSecOps Market Intellige
 
 ### 🛠️ The Pipeline
 1. **Automated Triggers:** A GitHub Actions CRON job fires daily at 11:31 AM UTC.
-2. **Data Extraction:** `scraper.py` executes, querying the Adzuna and Reed APIs to pull 500+ live cybersecurity roles.
+2. **Data Extraction:** `scraper.py` executes, querying the Adzuna and Reed APIs to pull 250+ live cybersecurity roles.
 3. **Transformation & Load:** The Python script cleans the JSON payloads, normalises the data structures, and commits the fresh leads securely to a Cloudflare D1 (SQLite) database.
 
-**Core Tech Stack:** Python 3, GitHub Actions (CI/CD), SQLite3, REST APIs.
+**Core Tech Stack:** Python 3, GitHub Actions (CI/CD), Cloudflare D1 (SQL), REST APIs.
