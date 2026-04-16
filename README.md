@@ -9,4 +9,4 @@ This is the automated data ingestion pipeline for the DevSecOps Market Intellige
 2. **Data Extraction:** `scraper.py` executes, querying the Adzuna and Reed APIs to pull 250+ live cybersecurity roles.
 3. **Transformation & Load:** The Python script cleans the JSON payloads, normalises the data structures, and commits the fresh leads securely to a Cloudflare D1 (SQLite) database.
 
-**Core Tech Stack:** Python 3, GitHub Actions (CI/CD), Cloudflare D1 (SQL), REST APIs.
+**Core Tech Stack:** Python 3, GitHub Actions (CI/CD), Cloudflare D1 (SQL), REST API Integration.
