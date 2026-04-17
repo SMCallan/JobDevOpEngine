@@ -26,23 +26,31 @@ CF_API_TOKEN = os.environ.get('CF_API_TOKEN')
 # 🎯 SEARCH CRITERIA & FILTERS (CALIBRATED FOR MID/SENIOR ENGINEERING)
 # ==========================================
 ADZUNA_KEYWORDS = [
-    "application security", 
-    "appsec", 
-    "product security", 
     "devsecops", 
-    "security engineer", 
-    "cloud security engineer", 
-    "backend python"
+    "platform engineer",
+    "site reliability engineer",
+    "application security", 
+    "product security", 
+    "cloud security",
+    "ai engineer",
+    "ai security",
+    "vulnerability researcher",
+    "senior software engineer",
+    "full stack engineer",
+    "backend python",
+    "tech lead"
 ]
 
-REED_KEYWORDS = '("application security" OR "appsec" OR "product security" OR "devsecops" OR "security engineer" OR "cloud security") NOT (Graduate OR Trainee OR Junior OR Intern OR Support)'
+REED_KEYWORDS = '("devsecops" OR "platform engineer" OR "site reliability" OR "appsec" OR "product security" OR "cloud security" OR "ai engineer" OR "ai security" OR "full stack" OR "senior software" OR "tech lead") NOT (Graduate OR Trainee OR Junior OR Intern OR Support OR Admin)'
 
 # Kill the noise: Aggressively filter out manual trades, entry-level, retail, and C-suite roles.
 BLACKLIST = [
     "graduate", "trainee", "intern", "junior", "apprentice", 
     "recruitment", "sales", "retail", "commerce", "store", "shop", 
-    "frontend", "front-end", "support", "helpdesk", "1st line", "2nd line", 
-    "customer service", "joiner", "carpenter", "plumber", "electrician", "mechanic",
+    "support", "helpdesk", "1st line", "2nd line", "customer service", 
+    "admin", "administrator", "soc", "analyst",
+    "teacher", "tutor", "lecturer",
+    "joiner", "carpenter", "plumber", "electrician", "mechanic",
     "part time", "part-time", "fractional", "cto", "chief", "vp", "director"
 ]
 
