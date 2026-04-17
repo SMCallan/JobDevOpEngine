@@ -23,27 +23,27 @@ CF_DATABASE_ID = os.environ.get('CF_DATABASE_ID')
 CF_API_TOKEN = os.environ.get('CF_API_TOKEN')
 
 # ==========================================
-# 🎯 SEARCH CRITERIA & FILTERS (BROADENED FOR UI SEARCH)
+# 🎯 SEARCH CRITERIA & FILTERS (CALIBRATED FOR MID/SENIOR ENGINEERING)
 # ==========================================
-# We cast a wider net here so the Database fills up, allowing the React UI search bar to do the heavy lifting.
 ADZUNA_KEYWORDS = [
     "application security", 
     "appsec", 
     "product security", 
     "devsecops", 
-    "security researcher", 
-    "threat intelligence", 
-    "backend security"
+    "security engineer", 
+    "cloud security engineer", 
+    "backend python"
 ]
 
-REED_KEYWORDS = '("application security" OR "appsec" OR "product security" OR "devsecops" OR "security researcher" OR "threat intelligence") NOT (Graduate OR Trainee OR Junior OR Intern)'
+REED_KEYWORDS = '("application security" OR "appsec" OR "product security" OR "devsecops" OR "security engineer" OR "cloud security") NOT (Graduate OR Trainee OR Junior OR Intern OR Support)'
 
-# Kill the noise: Ignore roles containing these keywords in the title
+# Kill the noise: Aggressively filter out manual trades, entry-level, retail, and C-suite roles.
 BLACKLIST = [
-    "graduate", "trainee", "intern", "junior", 
-    "recruitment", "sales", "retail", "commerce", 
-    "frontend", "front-end", "support", "helpdesk", 
-    "1st line", "2nd line", "customer service"
+    "graduate", "trainee", "intern", "junior", "apprentice", 
+    "recruitment", "sales", "retail", "commerce", "store", "shop", 
+    "frontend", "front-end", "support", "helpdesk", "1st line", "2nd line", 
+    "customer service", "joiner", "carpenter", "plumber", "electrician", "mechanic",
+    "part time", "part-time", "fractional", "cto", "chief", "vp", "director"
 ]
 
 
