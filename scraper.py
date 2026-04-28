@@ -652,6 +652,11 @@ def d1_enabled() -> bool:
 def run_d1_query(sql_query: str, params: Optional[Sequence[Any]] = None) -> Dict[str, Any]:
     """
     Execute a parameterised SQL query against Cloudflare D1 via the REST API.
+
+    Important:
+    - D1 write failures should fail the GitHub Action.
+    - Previously this function only printed errors and returned {}, which made
+      broken database writes look like successful pipeline runs.
     """
     if not d1_enabled():
         print("⚠️ D1 credentials not configured; skipping database call.")
@@ -668,20 +673,25 @@ def run_d1_query(sql_query: str, params: Optional[Sequence[Any]] = None) -> Dict
 
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
-        if response.status_code != 200:
-            print(f"❌ Cloudflare D1 API error ({response.status_code}): {response.text[:1000]}")
-            return {}
-
-        data = response.json()
-        if not data.get("success", False):
-            print(f"❌ Cloudflare D1 query unsuccessful: {json.dumps(data.get('errors', []))[:1000]}")
-        return data
     except requests.RequestException as exc:
-        print(f"❌ Network error calling Cloudflare D1: {exc}")
-        return {}
+        raise RuntimeError(f"Network error calling Cloudflare D1: {exc}") from exc
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Cloudflare D1 API error ({response.status_code}): {response.text[:1000]}"
+        )
+
+    try:
+        data = response.json()
     except ValueError as exc:
-        print(f"❌ Could not decode Cloudflare D1 response as JSON: {exc}")
-        return {}
+        raise RuntimeError(f"Could not decode Cloudflare D1 response as JSON: {exc}") from exc
+
+    if not data.get("success", False):
+        raise RuntimeError(
+            f"Cloudflare D1 query unsuccessful: {json.dumps(data.get('errors', []))[:1000]}"
+        )
+
+    return data
 
 
 def first_d1_results(data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -727,7 +737,10 @@ def init_db() -> None:
         "tags_json": "tags_json TEXT",
         "score_reasons_json": "score_reasons_json TEXT",
         "raw_json": "raw_json TEXT",
-        "last_seen_at": "last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+        # Do NOT use DEFAULT CURRENT_TIMESTAMP here.
+        # SQLite/D1 can reject ALTER TABLE ADD COLUMN when the default is non-constant.
+        # We set CURRENT_TIMESTAMP explicitly in INSERT/UPDATE statements instead.
+        "last_seen_at": "last_seen_at TEXT",
     }
 
     existing_rows = first_d1_results(run_d1_query("PRAGMA table_info(jobs);"))
@@ -738,11 +751,21 @@ def init_db() -> None:
             print(f"  ➕ Adding column: {column}")
             run_d1_query(f"ALTER TABLE jobs ADD COLUMN {ddl};")
 
+    # Backfill last_seen_at for legacy rows.
+    run_d1_query(
+        """
+        UPDATE jobs
+        SET last_seen_at = COALESCE(last_seen_at, timestamp, CURRENT_TIMESTAMP)
+        WHERE last_seen_at IS NULL;
+        """
+    )
+
     # Indexes for the Worker/API to use later.
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_timestamp ON jobs(timestamp DESC);")
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_fit_score ON jobs(fit_score DESC);")
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_role_track ON jobs(role_track);")
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_salary_band ON jobs(salary_band);")
+    run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_last_seen_at ON jobs(last_seen_at DESC);")
 
 
 def clean_old_jobs() -> None:
@@ -760,11 +783,19 @@ def mark_job_seen(job_id: str) -> None:
 
 
 def save_job_to_db(job: Dict[str, Any]) -> None:
+    """
+    Insert or update a job in D1.
+
+    This intentionally uses UPSERT rather than INSERT OR IGNORE so that:
+    - existing legacy rows receive fit_score, role_track, salary_band and culture_risk;
+    - existing rows get refreshed when the scoring model improves;
+    - last_seen_at is updated whenever the scraper sees the job again.
+    """
     if not d1_enabled():
         return
 
     sql = """
-        INSERT OR IGNORE INTO jobs (
+        INSERT INTO jobs (
             id,
             title,
             company,
@@ -786,7 +817,27 @@ def save_job_to_db(job: Dict[str, Any]) -> None:
             raw_json,
             last_seen_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            company = excluded.company,
+            salary = excluded.salary,
+            link = excluded.link,
+            source = excluded.source,
+            location = excluded.location,
+            description = excluded.description,
+            salary_min = excluded.salary_min,
+            salary_max = excluded.salary_max,
+            salary_type = excluded.salary_type,
+            salary_band = excluded.salary_band,
+            fit_score = excluded.fit_score,
+            role_track = excluded.role_track,
+            culture_risk = excluded.culture_risk,
+            seniority = excluded.seniority,
+            tags_json = excluded.tags_json,
+            score_reasons_json = excluded.score_reasons_json,
+            raw_json = excluded.raw_json,
+            last_seen_at = CURRENT_TIMESTAMP;
     """
 
     params = [
@@ -1097,19 +1148,25 @@ def run_pipeline() -> None:
     print(f"🎯 {len(final_jobs)} roles passed the minimum fit score of {MINIMUM_SAVE_SCORE}.")
 
     new_jobs_only: List[Dict[str, Any]] = []
+    saved_or_updated_count = 0
 
     for job in final_jobs:
         if not d1_enabled():
             new_jobs_only.append(job)
             continue
 
-        if is_new_job(job["id"]):
-            save_job_to_db(job)
+        is_new = is_new_job(job["id"])
+
+        # Always save. save_job_to_db() now performs an upsert, so old rows are
+        # enriched/backfilled and new rows are inserted.
+        save_job_to_db(job)
+        saved_or_updated_count += 1
+
+        if is_new:
             new_jobs_only.append(job)
-        else:
-            mark_job_seen(job["id"])
 
     print(f"💾 {len(new_jobs_only)} brand new roles identified.")
+    print(f"🔁 {saved_or_updated_count} scored roles inserted or refreshed in D1.")
 
     if new_jobs_only:
         send_to_discord(new_jobs_only)
