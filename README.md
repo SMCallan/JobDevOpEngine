@@ -1,6 +1,3 @@
-Absolutely — here’s a stronger replacement README for the ingestion engine repo.
-
-````markdown
 # ⚙️ Secure Engineering Role Radar: Ingestion Engine
 
 > **Note:** This repository contains the backend ingestion pipeline, scoring engine and job-source integrations.  
