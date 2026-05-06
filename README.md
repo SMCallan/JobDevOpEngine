@@ -59,6 +59,7 @@ The target salary range is tuned around a realistic **£60k–£85k core band**,
    - salary band
    - culture-risk indicators
    - company quality
+   - action recommendations derived from the score and available apply links
 
 7. **Cloudflare D1 Storage**  
    Enriched job records are written to Cloudflare D1 using parameterised SQL queries, avoiding manual string interpolation for untrusted external job-board data.
@@ -79,6 +80,8 @@ Each role receives a `fit_score` from 0 to 100.
 | Salary Fit | 20 | Prioritises £60k–£85k core roles and flags higher-value stretch opportunities |
 | Culture Risk | 15 | Detects pressure signals such as heavy on-call, “rockstar”, “wear many hats”, “fast-paced”, 24/7 and hypergrowth language |
 | Company Quality | 10 | Boosts target companies and mature engineering/security organisations |
+
+The pipeline also emits `action_recommendation` and `action_urgency` fields. These are derived from fit score, salary fit, culture-risk result and whether the source API supplied an apply URL. Adzuna and Reed do not provide a reliable native “easy apply” flag in the fields consumed here, so “Apply now” means “high-value role worth immediate application”, not “one-click apply is supported by the job board”.
 
 ---
 
@@ -106,6 +109,8 @@ It also adds richer fields for ranking, filtering and future dashboard features:
 - `role_track`
 - `culture_risk`
 - `seniority`
+- `action_recommendation`
+- `action_urgency`
 - `tags_json`
 - `score_reasons_json`
 - `raw_json`
@@ -188,6 +193,20 @@ The ingestion API does **not** currently provide enough source-backed data to su
 Adzuna and Reed provide job links, descriptions, salary data and employer metadata, but they do not expose a reliable native “easy apply” or “ready to apply now” flag in the fields consumed by this engine. Culture-risk is retained as per-role scoring context derived from advert text, but it is not a validated aggregate UI metric.
 
 The companion website should therefore hide these summary tiles unless its own API layer can back them with explicit, tested fields. The backend-supported summary metrics remain role count, fit score, salary band, role track, saved-state data owned by the frontend, and per-role score reasons.
+
+---
+
+## 🚦 Action Recommendations
+
+The frontend should use backend-generated action fields rather than inventing dashboard counters from raw source data:
+
+- `Apply now` / tag `apply-now`: high fit score, core/stretch salary, an apply URL is present and no blocking culture-risk signal is detected.
+- `Shortlist` / tag `shortlist`: good fit worth reviewing or tailoring before applying.
+- `Research culture first` / tag `high-culture-risk`: enough pressure/on-call/chaos language exists that the role should not be treated as an immediate application.
+- `Review manually` / tag `manual-review`: the API did not supply an apply URL, so the role cannot be actioned directly from the app.
+- `Review carefully`: insufficient combined role/salary/culture evidence for an immediate apply recommendation.
+
+Design note for the companion frontend: if a metric cannot be backed by these fields, hide it rather than showing a decorative counter. The API supports professional, decision-focused cards around score, action, salary band, culture badge and score reasons.
 
 ---
 
@@ -291,9 +310,9 @@ Without Cloudflare credentials, the pipeline can still fetch, score and print ro
 💾 12 brand new roles identified.
 
 🏆 Top roles this run:
-  -  84/100 | Application Security      | Product Security Engineer               | Target Company       | £75,000 - £95,000
-  -  79/100 | Platform / DevEx           | Platform Engineer                       | Mature Tech Co       | £65,000 - £85,000
-  -  76/100 | Secure Full-Stack          | Full Stack Engineer                     | Security SaaS Co     | £60,000 - £80,000
+  -  84/100 | Application Security      | Product Security Engineer               | Target Company       | £75,000 - £95,000 | Apply now
+  -  79/100 | Platform / DevEx           | Platform Engineer                       | Mature Tech Co       | £65,000 - £85,000 | Shortlist
+  -  76/100 | Secure Full-Stack          | Full Stack Engineer                     | Security SaaS Co     | £60,000 - £80,000 | Apply now
 --- Pipeline finished ---
 ```
 
@@ -303,9 +322,9 @@ Without Cloudflare credentials, the pipeline can still fetch, score and print ro
 
 Planned improvements include:
 
-* frontend display of fit scores and role tracks
+* frontend display of fit scores, role tracks and action recommendations
 * salary-band filtering
-* per-role culture notes in score reasons; no aggregate culture-risk dashboard counter until validated
+* culture-risk badges backed by `culture_risk` and `high-culture-risk` tags
 * saved/applied/interview application tracking
 * weekly Markdown or CSV export of top roles
 * source reliability scoring
