@@ -295,6 +295,8 @@ class ScoreResult:
     salary_type: str
     culture_risk: str
     seniority: str
+    action_recommendation: str
+    action_urgency: int
     tags: List[str]
     reasons: List[str]
 
@@ -504,18 +506,91 @@ def classify_culture(title: str, description: str) -> Tuple[str, int, List[str]]
         score -= min(10, len(risk_matches) * 3)
         reasons.append(f"Culture-risk terms found: {', '.join(risk_matches[:3])}")
 
-    if any(term in text for term in ["on-call", "on call", "out of hours", "24/7"]):
-        risk = "Check on-call"
-    elif score >= 13:
-        risk = "Low culture risk"
-    elif score >= 8:
-        risk = "Medium / verify"
-    elif score >= 5:
-        risk = "Possible chaos"
-    else:
-        risk = "High pressure risk"
+    has_on_call = any(term in text for term in ["on-call", "on call", "out of hours", "24/7"])
+    bounded_score = clamp(score, 0, 15)
 
-    return risk, clamp(score, 0, 15), reasons
+    if has_on_call and bounded_score < 8:
+        risk = "High culture-risk"
+    elif has_on_call:
+        risk = "Check on-call"
+    elif bounded_score >= 13:
+        risk = "Low culture-risk"
+    elif bounded_score >= 8:
+        risk = "Medium / verify"
+    elif bounded_score >= 5:
+        risk = "Possible culture-risk"
+    else:
+        risk = "High culture-risk"
+
+    return risk, bounded_score, reasons
+
+
+def action_tags_for_culture(culture_risk: str) -> List[str]:
+    culture_key = normalise_for_match(culture_risk)
+    tags: List[str] = []
+
+    if "high culture-risk" in culture_key or "possible culture-risk" in culture_key:
+        tags.append("high-culture-risk")
+    if "on-call" in culture_key:
+        tags.append("check-on-call")
+
+    return tags
+
+
+def classify_apply_action(
+    *,
+    fit_score: int,
+    salary_band: str,
+    culture_risk: str,
+    has_link: bool,
+) -> Tuple[str, int, List[str], List[str]]:
+    """
+    Convert scored API data into an actionable next step for the UI.
+
+    Neither Adzuna nor Reed exposes a reliable native "easy apply" flag in the
+    fields this pipeline consumes, so "Apply now" is intentionally a fit-based
+    recommendation rather than a claim about one-click application support.
+    """
+    salary_key = normalise_for_match(salary_band)
+    culture_key = normalise_for_match(culture_risk)
+
+    reasons: List[str] = []
+    tags: List[str] = []
+
+    if not has_link:
+        return (
+            "Review manually",
+            1,
+            ["No apply link was supplied by the source API; manual search required"],
+            ["manual-review"],
+        )
+
+    if "high culture-risk" in culture_key or "possible culture-risk" in culture_key:
+        return (
+            "Research culture first",
+            1,
+            ["Culture-risk signals should be checked before applying"],
+            ["research-culture", "high-culture-risk"],
+        )
+
+    strong_salary = any(term in salary_key for term in ["core target", "stretch", "high-value"])
+    viable_salary = strong_salary or any(term in salary_key for term in ["acceptable", "viable contract", "high day-rate"])
+
+    if fit_score >= 75 and strong_salary and "check on-call" not in culture_key:
+        reasons.append("High fit score, viable salary and no blocking culture-risk signal")
+        tags.append("apply-now")
+        return "Apply now", 3, reasons, tags
+
+    if fit_score >= 65 and viable_salary:
+        reasons.append("Good fit; review score reasons and tailor application")
+        tags.append("shortlist")
+        if "check on-call" in culture_key:
+            reasons.append("Confirm on-call expectations before applying")
+            tags.append("check-on-call")
+        return "Shortlist", 2, reasons, tags
+
+    reasons.append("Not enough combined fit/salary signal for an immediate application")
+    return "Review carefully", 1, reasons, ["review-carefully"]
 
 
 def company_score(company: str) -> Tuple[int, List[str], List[str]]:
@@ -598,14 +673,28 @@ def score_job(job: Dict[str, Any]) -> Dict[str, Any]:
         tags.append("stretch-seniority")
 
     total = role_score + skill_score + salary_score + culture_score + c_score
+    fit_score = clamp(total)
+
+    culture_tags = action_tags_for_culture(culture_risk)
+    action_recommendation, action_urgency, action_reasons, action_tags = classify_apply_action(
+        fit_score=fit_score,
+        salary_band=salary_band,
+        culture_risk=culture_risk,
+        has_link=bool(job.get("link")),
+    )
+    reasons.extend(action_reasons)
+    tags.extend(culture_tags)
+    tags.extend(action_tags)
 
     result = ScoreResult(
-        fit_score=clamp(total),
+        fit_score=fit_score,
         role_track=role_track,
         salary_band=salary_band,
         salary_type=salary_type,
         culture_risk=culture_risk,
         seniority=seniority,
+        action_recommendation=action_recommendation,
+        action_urgency=action_urgency,
         tags=sorted(set(tags)),
         reasons=reasons[:10],
     )
@@ -625,6 +714,8 @@ def score_job(job: Dict[str, Any]) -> Dict[str, Any]:
             "salary_type": result.salary_type,
             "culture_risk": result.culture_risk,
             "seniority": result.seniority,
+            "action_recommendation": result.action_recommendation,
+            "action_urgency": result.action_urgency,
             "tags": result.tags,
             "score_reasons": result.reasons,
         }
@@ -734,6 +825,8 @@ def init_db() -> None:
         "role_track": "role_track TEXT",
         "culture_risk": "culture_risk TEXT",
         "seniority": "seniority TEXT",
+        "action_recommendation": "action_recommendation TEXT",
+        "action_urgency": "action_urgency INTEGER DEFAULT 0",
         "tags_json": "tags_json TEXT",
         "score_reasons_json": "score_reasons_json TEXT",
         "raw_json": "raw_json TEXT",
@@ -765,6 +858,8 @@ def init_db() -> None:
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_fit_score ON jobs(fit_score DESC);")
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_role_track ON jobs(role_track);")
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_salary_band ON jobs(salary_band);")
+    run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_action_recommendation ON jobs(action_recommendation);")
+    run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_action_urgency ON jobs(action_urgency DESC);")
     run_d1_query("CREATE INDEX IF NOT EXISTS idx_jobs_last_seen_at ON jobs(last_seen_at DESC);")
 
 
@@ -812,12 +907,14 @@ def save_job_to_db(job: Dict[str, Any]) -> None:
             role_track,
             culture_risk,
             seniority,
+            action_recommendation,
+            action_urgency,
             tags_json,
             score_reasons_json,
             raw_json,
             last_seen_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             company = excluded.company,
@@ -834,6 +931,8 @@ def save_job_to_db(job: Dict[str, Any]) -> None:
             role_track = excluded.role_track,
             culture_risk = excluded.culture_risk,
             seniority = excluded.seniority,
+            action_recommendation = excluded.action_recommendation,
+            action_urgency = excluded.action_urgency,
             tags_json = excluded.tags_json,
             score_reasons_json = excluded.score_reasons_json,
             raw_json = excluded.raw_json,
@@ -857,6 +956,8 @@ def save_job_to_db(job: Dict[str, Any]) -> None:
         job.get("role_track"),
         job.get("culture_risk"),
         job.get("seniority"),
+        job.get("action_recommendation"),
+        job.get("action_urgency"),
         json.dumps(job.get("tags", []), ensure_ascii=False),
         json.dumps(job.get("score_reasons", []), ensure_ascii=False),
         json.dumps(job.get("raw", {}), ensure_ascii=False)[:10000],
@@ -1105,7 +1206,7 @@ def send_to_discord(jobs: List[Dict[str, Any]]) -> None:
                     f"**Company:** {truncate(job.get('company'), 80)}\n"
                     f"**Salary:** {job.get('salary')} · {job.get('salary_band')}\n"
                     f"**Track:** {job.get('role_track')} · **Culture:** {job.get('culture_risk')}\n"
-                    f"**Seniority:** {job.get('seniority')}\n\n"
+                    f"**Action:** {job.get('action_recommendation')} · **Seniority:** {job.get('seniority')}\n\n"
                     f"{reason_text}"
                 ),
                 "color": 15158332,
@@ -1178,7 +1279,8 @@ def run_pipeline() -> None:
         for job in final_jobs[:10]:
             print(
                 f"  - {job['fit_score']:>3}/100 | {job['role_track']:<24} | "
-                f"{truncate(job['title'], 50):<52} | {truncate(job['company'], 28):<30} | {job['salary']}"
+                f"{truncate(job['title'], 50):<52} | {truncate(job['company'], 28):<30} | "
+                f"{job['salary']} | {job.get('action_recommendation')}"
             )
 
     print("--- Pipeline finished ---")
