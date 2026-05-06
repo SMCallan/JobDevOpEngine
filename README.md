@@ -180,6 +180,20 @@ It also detects positive signals such as:
 - `reasonable adjustments`
 - `sustainable pace`
 
+
+---
+
+## 🧩 Frontend Feature Availability
+
+The ingestion API does **not** currently provide enough source-backed data to support dashboard counters for:
+
+- `Apply-now roles`
+- `High culture-risk`
+
+Adzuna and Reed provide job links, descriptions, salary data and employer metadata, but they do not expose a reliable native “easy apply” or “ready to apply now” flag in the fields consumed by this engine. Culture-risk is retained as per-role scoring context derived from advert text, but it is not a validated aggregate UI metric.
+
+The companion website should therefore hide these summary tiles unless its own API layer can back them with explicit, tested fields. The backend-supported summary metrics remain role count, fit score, salary band, role track, saved-state data owned by the frontend, and per-role score reasons.
+
 ---
 
 ## 🚦 Action Recommendations
